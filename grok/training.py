@@ -892,9 +892,9 @@ class CustomAdamW(torch.optim.Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
-        if not weight_decay_form in ["to_zero", "to_init", "jiggle", "honest"]:
+        if not weight_decay_form in ["to_zero", "to_init", "jiggle", "honest", "multiplied"]:
             raise ValueError(
-                f"Invalid weight decay form: {weight_decay_form}, should be one of ['to_zero', 'to_init', 'jiggle']"
+                f"Invalid weight decay form: {weight_decay_form}, should be one of ['to_zero', 'to_init', 'jiggle', 'honest', 'multiplied']"
             )
         # if not 0.0 <= weight_decay:
         #     raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
@@ -938,6 +938,8 @@ class CustomAdamW(torch.optim.Optimizer):
                 if group["weight_decay"] > 0:
                     if group["weight_decay_form"] == "honest":
                         grad = grad + group["weight_decay"] * p.detach()
+                    elif group["weight_decay_form"] == "multiplied":
+                        grad = grad * group["weight_decay"] * p.detach()
 
                 if grad.is_sparse:
                     raise RuntimeError(
@@ -981,6 +983,8 @@ class CustomAdamW(torch.optim.Optimizer):
                             )
                         )
                     elif group["weight_decay_form"] == "honest":
+                        pass
+                    elif group["weight_decay_form"] == "multiplied":
                         pass
                     else:
                         raise ValueError(
