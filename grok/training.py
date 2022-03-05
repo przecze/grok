@@ -12,6 +12,7 @@ from argparse import ArgumentParser, Namespace
 from functools import reduce
 from typing import Any, Dict, List, Optional, Tuple, Union
 import time
+from pytorch_lightning.loggers import WandbLogger
 
 import numpy as np
 import torch
@@ -47,7 +48,7 @@ class TrainableTransformer(LightningModule):
                         self.add_model_specific_args().
         """
         super().__init__()
-        self.hparams = hparams  # type: ignore
+        self.hparams.update(vars(hparams))  # type: ignore
         self.prepare_data()
 
         self.transformer = Transformer(
@@ -84,6 +85,9 @@ class TrainableTransformer(LightningModule):
             help="-1 -> entire dataset, 0 -> auto-calculate, 0<N<1 -> fraction of dataset, N>1 -> N",
         )
 
+
+        parser.add_argument("--no_wandb", dest="no_wandb", action="store_true")
+        parser.set_defaults(no_wandb=False)
         parser.add_argument("--n_layers", type=int, default=2)
         parser.add_argument("--n_heads", type=int, default=4)
         parser.add_argument("--d_model", type=int, default=128)
@@ -143,6 +147,9 @@ class TrainableTransformer(LightningModule):
             operand_length=self.hparams.operand_length,  # type: ignore
             data_dir=self.hparams.datadir,  # type: ignore
         )
+
+        print('Train batches:', len(self.train_dataset))
+        print('Validation batches:', len(self.val_dataset))
 
     def train_dataloader(self) -> ArithmeticIterator:  # type: ignore
         """
@@ -547,6 +554,13 @@ class TrainableTransformer(LightningModule):
         if self.current_epoch == 0:
             output["x_lhs"] = x_lhs
 
+
+        preds_indices = torch.argmax(y_hat_rhs, dim=1)
+
+        # print('ground truth', self.train_dataset.tokenizer.decode(batch['text'][0]))
+        # print('predicted', self.train_dataset.tokenizer.decode(preds_indices[0]))
+        # print()
+
         return output
 
     def validation_epoch_end(self, outputs):
@@ -704,7 +718,16 @@ def train(hparams: Namespace) -> None:
 
     torch.save(model, os.path.join(checkpoint_path, "init.pt"))
 
-    logger = CSVLogger(hparams.logdir)
+    if hparams.no_wandb:
+        logger = CSVLogger(hparams.logdir)
+    else:
+        logger = WandbLogger(project='grok')
+        logger.watch(model, log='all', log_freq=100)
+
+    print("=>Run parameters: \n")
+    for arg in vars(hparams):
+        logger.log_hyperparams({arg: getattr(hparams, arg)})
+        print(arg, getattr(hparams, arg))
 
     # checkpointer = ModelCheckpoint(
     #     filepath=checkpoint_path,
@@ -869,9 +892,9 @@ class CustomAdamW(torch.optim.Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
-        if not weight_decay_form in ["to_zero", "to_init", "jiggle", "honest"]:
+        if not weight_decay_form in ["to_zero", "to_init", "jiggle", "honest", "multiplied"]:
             raise ValueError(
-                f"Invalid weight decay form: {weight_decay_form}, should be one of ['to_zero', 'to_init', 'jiggle']"
+                f"Invalid weight decay form: {weight_decay_form}, should be one of ['to_zero', 'to_init', 'jiggle', 'honest', 'multiplied']"
             )
         # if not 0.0 <= weight_decay:
         #     raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
@@ -915,6 +938,8 @@ class CustomAdamW(torch.optim.Optimizer):
                 if group["weight_decay"] > 0:
                     if group["weight_decay_form"] == "honest":
                         grad = grad + group["weight_decay"] * p.detach()
+                    elif group["weight_decay_form"] == "multiplied":
+                        grad = grad * group["weight_decay"] * p.detach()
 
                 if grad.is_sparse:
                     raise RuntimeError(
@@ -958,6 +983,8 @@ class CustomAdamW(torch.optim.Optimizer):
                             )
                         )
                     elif group["weight_decay_form"] == "honest":
+                        pass
+                    elif group["weight_decay_form"] == "multiplied":
                         pass
                     else:
                         raise ValueError(
