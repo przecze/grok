@@ -12,6 +12,7 @@ setup(
         "tqdm",
         "scipy",
         "sympy",
+        "wandb",
         "mod",
         "matplotlib",
     ],
